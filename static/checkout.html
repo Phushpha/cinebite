@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkout — CineBite</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .holdbar{
+    background:rgba(255,183,3,.09);border:1px solid rgba(255,183,3,.35);
+    color:#ffd97a;padding:11px 16px;border-radius:11px;font-size:.9rem;margin-bottom:18px;
+    display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  }
+  .success{text-align:center;padding:44px 20px}
+  .success .big{font-size:4rem}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="brand" href="index.html"><span class="logo">🍿</span> Cine<span>Bite</span></a>
+  <div class="links">
+    <a href="index.html">Movies</a>
+    <a href="menu.html">Popcorn & Drinks</a>
+    <a href="orders.html">My Tickets</a>
+  </div>
+  <div class="right"><a href="login.html" class="btn sm" data-auth-link>Login</a></div>
+</nav>
+
+<div class="wrap" style="max-width:960px">
+  <div id="main">
+    <div class="section-title"><h2>💳 Checkout</h2><div class="rule"></div></div>
+    <div id="alerts"></div>
+    <div class="holdbar hidden" id="holdBar">
+      <span>⏳ Seats held for you — complete payment soon.</span>
+      <b id="holdTimer">10:00</b>
+    </div>
+
+    <div class="two">
+      <div class="panel" id="orderPanel"><div class="spinner"></div></div>
+      <div class="panel" id="payPanel">
+        <h3>Payment</h3>
+        <p class="muted" style="font-size:.88rem;margin:8px 0 16px">
+          Secured by <b style="color:#3395ff">Razorpay</b> — cards, UPI, netbanking &amp; wallets.
+        </p>
+        <div id="rzpNote" class="notice info">Checking payment configuration…</div>
+        <button class="btn block" id="payBtn" onclick="payNow()" disabled>Pay Now</button>
+        <p class="muted center mt" style="font-size:.78rem">
+          🔒 Your payment details never touch our servers.
+        </p>
+        <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
+        <div id="userBox" class="muted" style="font-size:.85rem"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="done" class="hidden">
+    <div class="panel success">
+      <div class="big">🎉</div>
+      <h1>Payment Successful!</h1>
+      <p class="muted mt" id="doneMsg">Your booking is confirmed.</p>
+      <div class="code" id="doneCode" style="display:inline-block;margin-top:14px;font-size:1.2rem"></div>
+      <div class="mt" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="orders.html" class="btn">View My Tickets</a>
+        <a href="index.html" class="btn ghost">Book Another Movie</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <a href="privacy.html">Privacy</a>
+  <a href="terms.html">Terms</a>
+  <span>© 2026 CineBite</span>
+</footer>
+
+<script src="assets/app.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+let cartData = null;
+let booking = null;          // server booking after /api/bookings
+let holdInt = null;
+let cfg = null;
+
+function alertBox(msg, kind = "err") {
+  const text = typeof msg === "string" ? msg : JSON.stringify(msg);
+  document.getElementById("alerts").innerHTML = `<div class="notice ${kind}">${esc(text)}</div>`;
+}
+
+async function init() {
+  if (!requireLogin()) return;
+  cartData = cart.read();
+  let hold = store.get("cb_hold", null);
+  const now = Math.floor(Date.now() / 1000);
+  if (hold && !hold.booking_id) { store.del("cb_hold"); hold = null; }  // legacy/corrupt hold
+
+  if (hold && hold.expires_at > now + 5) {
+    if (cartSig(cartData) === hold.sig) {
+      await loadConfig();
+      reuseHold(hold);            // same cart: pay the existing hold
+      return;
+    }
+    if (cartData.show_id || cartData.items.length) {
+      /* cart changed: release the old hold, then create a fresh one */
+      try { await api(`/api/bookings/${hold.booking_id}/cancel`, { method: "POST" }); } catch {}
+      store.del("cb_hold");
+    } else {
+      /* cart empty (came from My Tickets): restore it from the hold */
+      cartData = {
+        show_id: hold.show_id, seats: hold.seats, items: hold.items,
+        show_info: hold.show_info, prices: {},
+      };
+      cart.write(cartData);
+      await loadConfig();
+      reuseHold(hold);
+      return;
+    }
+  } else if (hold) {
+    store.del("cb_hold");
+  }
+
+  if (!cartData.show_id && !cartData.items.length) {
+    document.getElementById("orderPanel").innerHTML =
+      `<p class="muted">Your cart is empty. <a href="menu.html" style="color:var(--acc)">Add snacks</a>
+       or <a href="index.html" style="color:var(--acc)">book a movie</a>.</p>`;
+    return;
+  }
+
+  await loadConfig();
+
+  /* release any stale hold of mine on this same show (e.g. lost localStorage),
+     otherwise my own reservation would look like "someone else" took the seat */
+  if (cartData.show_id) {
+    try {
+      const { bookings } = await api("/api/bookings");
+      for (const b of bookings) {
+        const overlap = b.status === "held" && b.show_id === cartData.show_id &&
+          b.seats.some(s => cartData.seats.includes(s)) && b.id !== (hold ? hold.booking_id : -1);
+        if (overlap) {
+          await api(`/api/bookings/${b.id}/cancel`, { method: "POST" });
+        }
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  /* seat prices come from the server layout, never from the client */
+  if (cartData.show_id) {
+    /* stale half-state: show selected but no seats - drop the ticket part, keep snacks */
+    if (!cartData.seats.length) {
+      cartData.show_id = null;
+      cartData.show_info = null;
+      cart.write(cartData);
+    } else {
+      try {
+        const seatsData = await api(`/api/shows/${cartData.show_id}/seats`);
+        cartData.prices = {};
+        seatsData.seats.forEach(s => cartData.prices[s.seat] = s.price);
+        const stillTaken = new Set(seatsData.taken);
+        const gone = cartData.seats.filter(s => stillTaken.has(s));
+        if (gone.length) {
+          cartData.seats = cartData.seats.filter(s => !stillTaken.has(s));
+          const c = cart.read(); c.seats = cartData.seats; cart.write(c);
+          if (!cartData.seats.length) {
+            /* every seat was taken - keep the snacks, let the user rebook seats */
+            cartData.show_id = null;
+            cartData.show_info = null;
+            cart.write(cartData);
+            alertBox(`Seats ${gone.join(", ")} were just taken by someone else. Your snacks are saved — reselect seats from the movie page.`, "info");
+          } else {
+            alertBox(`Seat ${gone.join(", ")} was just taken by someone else.`, "info");
+          }
+        }
+      } catch (e) { alertBox(e.message); return; }
+    }
+  }
+
+  renderOrder();
+  renderUserBox();
+  await createBooking();     // lock the seats / register the snack order
+}
+
+/* signature of the current cart, to know if a stored hold still matches it */
+function cartSig(c) {
+  return JSON.stringify([c.show_id, [...c.seats].sort(),
+    c.items.map(i => [i.id, i.qty]).sort((a, b) => a[0] - b[0])]);
+}
+
+/* payment configuration status - honest, never a fake mode */
+async function loadConfig() {
+  try {
+    cfg = await api("/api/config");
+    const note = document.getElementById("rzpNote");
+    if (cfg.razorpay.configured) {
+      note.className = "notice ok";
+      note.innerHTML = `Razorpay connected in <b>${cfg.razorpay.mode.toUpperCase()}</b> mode
+        (<code>${esc(cfg.razorpay.key_id)}</code>)`;
+      document.getElementById("payBtn").disabled = false;
+    } else {
+      note.className = "notice err";
+      note.innerHTML = `Razorpay keys are not set yet.<br>
+        Add <code>RAZORPAY_KEY_ID</code> &amp; <code>RAZORPAY_KEY_SECRET</code> to the
+        <code>.env</code> file and restart the server.`;
+    }
+  } catch (e) { alertBox(e.message); }
+}
+
+/* a matching hold already exists - skip creating another booking */
+function reuseHold(hold) {
+  booking = {
+    id: hold.booking_id, code: hold.code, amount: hold.amount,
+    breakdown: hold.breakdown, seats: hold.seats, items: hold.items,
+  };
+  renderOrderFixed(booking);
+  renderUserBox();
+  startHoldTimer(hold.expires_at);
+}
+
+function renderUserBox() {
+  const u = auth.user() || {};
+  document.getElementById("userBox").innerHTML =
+    `Paying as <b style="color:var(--acc)">${esc(u.email || u.phone || "")}</b>
+     <a href="#" onclick="auth.clear();location.href='login.html'" style="color:var(--mut);text-decoration:underline">change</a>`;
+}
+
+function renderOrder() {
+  const c = cartData;
+  const seatTotal = c.show_id ? c.seats.reduce((sum, s) => sum + seatPrice(s), 0) : 0;
+  const fee = c.show_id ? 25 * c.seats.length : 0;
+  const snacksTotal = c.items.reduce((s, i) => s + i.price * i.qty, 0);
+
+  const seatBlock = c.show_id && c.show_info ? `
+    <h3>🎬 Movie Ticket</h3>
+    <div class="cartline" style="border:none">
+      <span style="font-size:1.5rem">🎞</span>
+      <div class="nm"><b>${esc(c.show_info.movie)}</b>
+        <small>${esc(c.show_info.screen)} · ${new Date(c.show_info.starts_at)
+          .toLocaleString("en-IN", { weekday:"short", day:"numeric", month:"short",
+            hour:"2-digit", minute:"2-digit", hour12:true })}</small></div>
+    </div>
+    <div class="cartline" style="border:none;padding-top:0">
+      <span style="font-size:1.5rem">🪑</span>
+      <div class="nm"><b>Seats ${c.seats.map(esc).join(", ")}</b>
+        <small>${c.seats.length} ticket(s)</small></div>
+      <b>${money(seatTotal)}</b>
+    </div>` : "";
+
+  const snackBlock = c.items.length ? `
+    <h3 class="mt">🍿 Snacks</h3>` + c.items.map(i => `
+    <div class="cartline">
+      <span style="font-size:1.4rem">🍽</span>
+      <div class="nm"><b>${esc(i.name)}${i.size ? " · " + esc(i.size) : ""}</b>
+        <small>${money(i.price)} × ${i.qty}</small></div>
+      <b>${money(i.price * i.qty)}</b>
+    </div>`).join("") : "";
+
+  const isFoodOnly = !c.show_id;
+  document.getElementById("orderPanel").innerHTML = `
+    ${seatBlock}${snackBlock}
+    <div class="sumrow"><span>${c.show_id ? "Tickets" : "Order"}</span><span>${money(seatTotal)}</span></div>
+    <div class="sumrow"><span>Snacks</span><span>${money(snacksTotal)}</span></div>
+    <div class="sumrow"><span>Convenience fee</span><span>${money(fee)}</span></div>
+    <div class="sumrow total"><span>To pay</span><span id="grandTotal">${money(seatTotal + snacksTotal + fee)}</span></div>
+    ${isFoodOnly ? `<p class="muted mt" style="font-size:.83rem">🥤 Pickup at the snack counter with your order code — no show attached.</p>` : ""}
+  `;
+}
+
+/* seat pricing comes from the server-fetched seat map cached in cartData.prices */
+function seatPrice(seat) {
+  if (cartData.prices && cartData.prices[seat]) return cartData.prices[seat];
+  return 0;
+}
+
+async function createBooking() {
+  const c = cartData;
+  try {
+    booking = await api("/api/bookings", {
+      method: "POST",
+      body: JSON.stringify({
+        show_id: c.show_id,
+        seats: c.seats,
+        items: c.items.map(i => ({ id: i.id, qty: i.qty })),
+      }),
+    });
+    booking.id = booking.booking_id;   // server field name is booking_id
+    /* remember this hold so coming back (or My Tickets -> Complete Payment)
+       pays the same booking instead of creating a second one */
+    store.set("cb_hold", {
+      booking_id: booking.id, code: booking.code, amount: booking.amount,
+      breakdown: booking.breakdown, seats: booking.seats, items: booking.items,
+      show_id: c.show_id, show_info: c.show_info || null,
+      expires_at: booking.expires_at, sig: cartSig(c),
+    });
+    renderOrderFixed(booking);
+    startHoldTimer(booking.expires_at);
+  } catch (e) {
+    alertBox(e.message);
+    document.getElementById("payBtn").disabled = true;
+    if (e.message.toLowerCase().includes("login")) auth.clear();
+  }
+}
+
+/* render using server-calculated amounts (source of truth) */
+function renderOrderFixed(b) {
+  const c = cartData;
+  const seatBlock = c.show_id && c.show_info ? `
+    <h3>🎬 Movie Ticket</h3>
+    <div class="cartline" style="border:none">
+      <span style="font-size:1.5rem">🎞</span>
+      <div class="nm"><b>${esc(c.show_info.movie)}</b>
+        <small>${esc(c.show_info.screen)} · ${new Date(c.show_info.starts_at)
+          .toLocaleString("en-IN", { weekday:"short", day:"numeric", month:"short",
+            hour:"2-digit", minute:"2-digit", hour12:true })}</small></div>
+      <b>${money(b.breakdown.seats)}</b>
+    </div>
+    <div class="cartline" style="border:none;padding-top:0">
+      <span style="font-size:1.5rem">🪑</span>
+      <div class="nm"><b>Seats ${b.seats.map(esc).join(", ")}</b>
+        <small>${b.seats.length} ticket(s)</small></div>
+    </div>` : "";
+
+  const snackBlock = b.items.length ? `
+    <h3 class="mt">🍿 Snacks</h3>` + b.items.map(i => `
+    <div class="cartline">
+      <span style="font-size:1.4rem">🍽</span>
+      <div class="nm"><b>${esc(i.name)}${i.size ? " · " + esc(i.size) : ""}</b>
+        <small>${money(i.price)} × ${i.qty}</small></div>
+      <b>${money(i.price * i.qty)}</b>
+    </div>`).join("") : "";
+
+  document.getElementById("orderPanel").innerHTML = `
+    ${seatBlock}${snackBlock}
+    ${c.show_id ? `<div class="sumrow"><span>Tickets</span><span>${money(b.breakdown.seats)}</span></div>` : ""}
+    <div class="sumrow"><span>Snacks</span><span>${money(b.breakdown.snacks)}</span></div>
+    ${b.breakdown.convenience_fee ? `<div class="sumrow"><span>Convenience fee</span><span>${money(b.breakdown.convenience_fee)}</span></div>` : ""}
+    <div class="sumrow total"><span>To pay</span><span>${money(b.amount)}</span></div>
+    <p class="muted" style="font-size:.8rem">Booking ref <code>${esc(b.code)}</code></p>`;
+}
+
+function startHoldTimer(expiresAt) {
+  clearInterval(holdInt);
+  const bar = document.getElementById("holdBar");
+  bar.classList.remove("hidden");
+  const tick = () => {
+    const left = expiresAt - Math.floor(Date.now() / 1000);
+    if (left <= 0) {
+      clearInterval(holdInt);
+      document.getElementById("holdTimer").textContent = "EXPIRED";
+      document.getElementById("payBtn").disabled = true;
+      store.del("cb_hold");
+      alertBox("Your seat hold expired. Go back and book again.", "err");
+      return;
+    }
+    document.getElementById("holdTimer").textContent =
+      `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  };
+  tick();
+  holdInt = setInterval(tick, 1000);
+}
+
+/* ---------------- Razorpay ---------------- */
+async function payNow() {
+  if (!booking || !(booking.id || booking.booking_id)) { alertBox("Booking not ready yet."); return; }
+  if (typeof Razorpay === "undefined") {
+    alertBox("Razorpay checkout failed to load — check your internet connection and reload the page.");
+    return;
+  }
+  const bid = booking.id || booking.booking_id;
+  const btn = document.getElementById("payBtn");
+  btn.disabled = true; btn.textContent = "Opening Razorpay…";
+  try {
+    const order = await api(`/api/bookings/${bid}/pay`, { method: "POST" });
+    const u = auth.user() || {};
+    const rzp = new Razorpay({
+      key: order.key_id,
+      order_id: order.order_id,
+      amount: order.amount,
+      currency: order.currency,
+      name: "CineBite",
+      description: `Booking ${order.booking_code}`,
+      image: "",
+      prefill: { email: u.email || "", contact: (u.phone || "").replace("+", "") },
+      notes: { booking_code: order.booking_code },
+      theme: { color: "#ffb703" },
+      handler: async resp => {
+        try {
+          const result = await api("/api/payments/verify", {
+            method: "POST",
+            body: JSON.stringify({
+              order_id: resp.razorpay_order_id,
+              payment_id: resp.razorpay_payment_id,
+              signature: resp.razorpay_signature,
+            }),
+          });
+          showSuccess(result.code, resp.razorpay_payment_id);
+        } catch (e) {
+          alertBox("Payment done but verification failed: " + e.message +
+                   " — check My Tickets, it settles via webhook too.");
+          btn.disabled = false; btn.textContent = "Retry verification";
+        }
+      },
+      modal: {
+        ondismiss: () => {
+          btn.disabled = false;
+          btn.textContent = "Pay Now";
+          toast("Payment window closed — seats still held", "err");
+        },
+      },
+    });
+    rzp.on("payment.failed", r => {
+      alertBox("Payment failed: " + (r.error.description || "unknown error") +
+               " — you can retry while the hold is active.");
+      btn.disabled = false; btn.textContent = "Retry Payment";
+    });
+    rzp.open();
+  } catch (e) {
+    alertBox(e.message);
+    btn.disabled = false; btn.textContent = "Pay Now";
+  }
+}
+
+function showSuccess(code, paymentId) {
+  clearInterval(holdInt);
+  store.del("cb_hold");
+  cart.clear();
+  document.getElementById("main").classList.add("hidden");
+  document.getElementById("done").classList.remove("hidden");
+  document.getElementById("doneCode").textContent = "REF " + code;
+  document.getElementById("doneMsg").innerHTML =
+    `Payment <code>${esc(paymentId)}</code> confirmed. Show this reference at the counter.`;
+  window.scrollTo(0, 0);
+}
+
+init();
+</script>
+</body>
+</html>

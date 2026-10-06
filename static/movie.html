@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Select Seats — CineBite</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .mheader{display:grid;grid-template-columns:200px 1fr;gap:24px;align-items:start}
+  .mheader .poster{border-radius:14px;aspect-ratio:2/2.9;max-width:200px}
+  @media(max-width:700px){.mheader{grid-template-columns:1fr}.mheader .poster{max-width:190px}}
+  .showgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+  .cityhint{font-size:.82rem;color:var(--mut)}
+  .selbar{
+    position:sticky;bottom:0;z-index:40;background:rgba(18,21,31,.96);backdrop-filter:blur(10px);
+    border-top:1px solid var(--line);padding:14px 22px;display:flex;gap:16px;
+    align-items:center;justify-content:space-between;flex-wrap:wrap;
+  }
+  .selbar .info b{color:var(--acc)}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="brand" href="index.html"><span class="logo">🍿</span> Cine<span>Bite</span></a>
+  <div class="links">
+    <a href="index.html">Movies</a>
+    <a href="menu.html">Popcorn & Drinks</a>
+    <a href="orders.html">My Tickets</a>
+  </div>
+  <div class="right">
+    <span id="citySlot"></span>
+    <a href="menu.html" class="btn ghost sm cart-btn">🛒 <span class="cart-badge" data-cart-badge>0</span></a>
+    <a href="login.html" class="btn sm" data-auth-link>Login</a>
+  </div>
+</nav>
+
+<div class="wrap" style="padding-bottom:110px">
+  <div id="movieHeader"><div class="spinner"></div></div>
+
+  <div id="daySection">
+    <div class="section-title"><h2>📅 Select Day</h2><div class="rule"></div></div>
+    <div class="chips" id="dayChips"></div>
+  </div>
+
+  <div id="showSection">
+    <div class="section-title">
+      <h2>🕐 Select Showtime</h2><div class="rule"></div>
+      <span class="cityhint" id="cityHint"></span>
+    </div>
+    <div id="theatreList"><div class="spinner"></div></div>
+  </div>
+
+  <div id="emptyBox" class="hidden"></div>
+
+  <div id="seatSection" class="hidden">
+    <div class="section-title">
+      <h2>🪑 Select Seats</h2><div class="rule"></div>
+      <span class="pill grey" id="seatPriceHint"></span>
+    </div>
+    <div class="screen-bar">SCREEN</div>
+    <div class="seatwrap" id="seatWrap"></div>
+    <div class="legend">
+      <span><i style="background:var(--card2)"></i>Available</span>
+      <span><i style="background:var(--grad);border-color:var(--acc)"></i>Selected</span>
+      <span><i style="background:#252a3c;border-color:#252a3c"></i>Sold</span>
+      <span><i style="background:var(--card2);border-color:rgba(255,183,3,.5)"></i>Premium Recliner</span>
+    </div>
+  </div>
+</div>
+
+<div class="selbar hidden" id="selBar">
+  <div class="info" id="selInfo"></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="menu.html" class="btn ghost">🍿 Add Snacks</a>
+    <button class="btn" id="proceedBtn" onclick="proceed()">Continue → Choose Snacks</button>
+  </div>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const movieId = Number(params.get("id"));
+let movie = null, days = [], selectedDay = null, selectedShow = null;
+let seatData = null, selectedSeats = [], pollTimer = null, cityNow = "";
+
+function show(id, on) { document.getElementById(id).classList.toggle("hidden", !on); }
+
+function renderHeader() {
+  document.getElementById("movieHeader").innerHTML = `
+    <div class="mheader">
+      ${posterHTML(movie)}
+      <div>
+        <span class="pill gold">${esc(movie.certificate)}</span>
+        <span class="pill green">★ ${movie.rating}</span>
+        ${movie.releasing
+          ? '<span class="pill red">IN CINEMAS NOW</span>'
+          : `<span class="pill gold">📅 ${esc(relLabel(movie))}</span>`}
+        <h1 style="margin:10px 0 4px">${esc(movie.title)}</h1>
+        <p class="muted" style="font-style:italic">${esc(movie.tagline)}</p>
+        <p class="muted">${esc(movie.genres)} · ${movie.duration_min} min · ${esc(movie.languages)}</p>
+        ${movie.release_date
+          ? `<p class="muted" style="font-size:.88rem">Released ${fmtDate(movie.release_date, { day: "numeric", month: "long", year: "numeric" })}</p>` : ""}
+        <p style="margin-top:12px;max-width:720px">${esc(movie.description)}</p>
+      </div>
+    </div>`;
+}
+
+function renderDays() {
+  const fmt = d => {
+    const dt = new Date(d + "T00:00:00");
+    const today = new Date(); today.setHours(0,0,0,0);
+    const diff = Math.round((dt - today) / 86400000);
+    const tag = diff === 0 ? "Today" : diff === 1 ? "Tomorrow" : dt.toLocaleDateString("en-IN", { weekday: "short" });
+    return `${tag}<br><small>${dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</small>`;
+  };
+  document.getElementById("dayChips").innerHTML = days.map((d, i) =>
+    `<button class="chip ${i === 0 ? "on" : ""}" data-day="${d}" onclick="pickDay('${d}',this)">${fmt(d)}</button>`
+  ).join("");
+  selectedDay = days[0] || null;
+}
+
+async function pickDay(day, el) {
+  selectedDay = day;
+  document.querySelectorAll("#dayChips .chip").forEach(c => c.classList.remove("on"));
+  el.classList.add("on");
+  await loadShows();
+}
+
+function showEmpty(kind) {
+  const box = document.getElementById("emptyBox");
+  box.classList.remove("hidden");
+  if (kind === "soon") {
+    box.innerHTML = `
+      <div class="soonbox">
+        <span class="pill gold">COMING SOON</span>
+        <div class="big">${esc(movie.title)} releases on ${fmtDate(movie.release_date, { day: "numeric", month: "long", year: "numeric" })}</div>
+        <p class="sub">Showtimes and seat booking open a couple of days before release — pick another film for tonight.</p>
+        <div style="margin-top:16px"><a href="index.html" class="btn">Browse films in cinemas</a></div>
+      </div>`;
+  } else {
+    box.innerHTML = `
+      <div class="empty">
+        <p><b>No shows in ${esc(cityNow || "this city")} for these dates.</b></p>
+        <p style="font-size:.9rem">Switch city from the 📍 selector in the top bar, or pick another day.</p>
+        <div style="margin-top:14px"><a href="index.html#now-showing" class="btn ghost sm">← All movies</a></div>
+      </div>`;
+  }
+}
+
+async function loadMovie() {
+  const grid = document.getElementById("theatreList");
+  show("emptyBox", false);
+  show("seatSection", false);
+  document.getElementById("daySection").classList.add("hidden");
+  document.getElementById("showSection").classList.add("hidden");
+  stopPoll();
+
+  try {
+    const q = cityNow ? `?city=${encodeURIComponent(cityNow)}` : "";
+    const data = await api(`/api/movies/${movieId}${q}`);
+    movie = data.movie;
+    days = data.days;
+    document.title = movie.title + " — CineBite";
+    renderHeader();
+
+    if (!days.length) {
+      showEmpty(movie.releasing ? "city" : "soon");
+      return;
+    }
+    show("daySection", true);
+    show("showSection", true);
+    document.getElementById("cityHint").textContent =
+      cityNow ? `📍 cinemas in ${cityNow}` : "";
+    renderDays();
+    await loadShows();
+  } catch (e) {
+    document.getElementById("movieHeader").innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+  }
+}
+
+async function loadShows() {
+  selectedShow = null;
+  document.getElementById("seatSection").classList.add("hidden");
+  stopPoll();
+  const grid = document.getElementById("theatreList");
+  grid.innerHTML = '<div class="spinner"></div>';
+  try {
+    const q = `?movie_id=${movieId}&day=${selectedDay}` +
+              (cityNow ? `&city=${encodeURIComponent(cityNow)}` : "");
+    const { shows } = await api(`/api/shows${q}`);
+    if (!shows.length) {
+      grid.innerHTML = '<div class="empty">No shows on this day in ' +
+        esc(cityNow || "your city") + '. Try another day.</div>';
+      return;
+    }
+
+    /* group the flat list into one block per theatre */
+    const order = [], byName = {};
+    shows.forEach(s => {
+      if (!byName[s.theatre_name]) { byName[s.theatre_name] = []; order.push(s.theatre_name); }
+      byName[s.theatre_name].push(s);
+    });
+
+    grid.innerHTML = order.map(name => {
+      const list = byName[name];
+      const halls = [...new Set(list.map(s => s.screen_name))];
+      const from = Math.min(...list.map(s => s.price));
+      return `
+      <div class="theatre">
+        <div class="thead">
+          <div>
+            <div class="tname"><i>🏢</i>${esc(name)}</div>
+            <div class="tarea">${esc(list[0].theatre_area || "")}${list[0].city ? " · " + esc(list[0].city) : ""}</div>
+          </div>
+          <div class="tfacts">
+            <span>🖥 ${halls.map(esc).join(" · ")}</span>
+            <span>🎟 from ${money(from)}</span>
+          </div>
+        </div>
+        <div class="showgrid">${list.map(showtimeCard).join("")}</div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    grid.innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+  }
+}
+
+function showtimeCard(s) {
+  const t = new Date(s.starts_at);
+  const total = s.total_seats || 140;
+  const free = total - s.taken_count;
+  const full = free <= 0;
+  return `<div class="showtime ${full ? "full" : ""}" onclick="${full ? "" : `pickShow(${s.id}, this)`}"
+               id="show-${s.id}">
+    ${t.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+    <small>${esc(s.screen_name)} · ${money(s.price)} · ${full ? "SOLD OUT" : free + " of " + total + " seats"}</small>
+  </div>`;
+}
+
+async function pickShow(showId, el) {
+  document.querySelectorAll(".showtime").forEach(s => s.classList.remove("on"));
+  el.classList.add("on");
+  selectedShow = showId;
+  selectedSeats = [];
+  document.getElementById("seatSection").classList.remove("hidden");
+  await loadSeats();
+  startPoll();
+}
+
+async function loadSeats() {
+  if (!selectedShow) return;
+  try {
+    seatData = await api(`/api/shows/${selectedShow}/seats`);
+  } catch (e) { toast(e.message, "err"); return; }
+
+  const { layout, seats, taken, show } = seatData;
+  const takenSet = new Set(taken);
+  const aisles = new Set(layout.aisle_after);
+  const premiumRows = new Set(layout.tiers.find(t => t.name.includes("Premium"))?.rows || []);
+
+  document.getElementById("seatPriceHint").textContent =
+    `From ${money(show.price)} · ${layout.tiers.map(t => t.name + " " + money(Math.round(show.price * t.multiplier))).join(" / ")}`;
+
+  const priceOf = seat => seats.find(s => s.seat === seat)?.price || show.price;
+  const html = layout.rows.map(row => {
+    let cells = `<span class="rowlbl">${row}</span>`;
+    for (let n = 1; n <= layout.seats_per_row; n++) {
+      const label = row + n;
+      const isTaken = takenSet.has(label);
+      const isSel = selectedSeats.includes(label);
+      const cls = ["seat", premiumRows.has(row) ? "premium" : "", isTaken ? "taken" : "avail", isSel ? "sel" : ""].join(" ");
+      cells += `<button class="${cls}" data-seat="${label}"
+        onclick="toggleSeat('${label}')">${n}</button>`;
+      if (aisles.has(n)) cells += '<span class="aisle"></span>';
+    }
+    cells += `<span class="rowlbl">${row}</span>`;
+    return `<div class="seatrow">${cells}</div>`;
+  }).join("");
+  document.getElementById("seatWrap").innerHTML = html;
+
+  /* selection may have been stolen by another user while polling */
+  selectedSeats = selectedSeats.filter(s => !takenSet.has(s));
+  renderSelBar();
+
+  document.getElementById("seatSection").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function toggleSeat(label) {
+  const taken = new Set(seatData.taken);
+  if (taken.has(label)) return;
+  const idx = selectedSeats.indexOf(label);
+  if (idx >= 0) selectedSeats.splice(idx, 1);
+  else {
+    if (selectedSeats.length >= 10) { toast("Max 10 seats per booking", "err"); return; }
+    selectedSeats.push(label);
+  }
+  const btn = document.querySelector(`[data-seat="${label}"]`);
+  if (btn) btn.classList.toggle("sel", selectedSeats.includes(label));
+  renderSelBar();
+}
+
+function seatTotal() {
+  if (!seatData) return 0;
+  return selectedSeats.reduce((sum, s) =>
+    sum + (seatData.seats.find(x => x.seat === s)?.price || 0), 0);
+}
+
+function renderSelBar() {
+  const bar = document.getElementById("selBar");
+  if (!selectedShow || !selectedSeats.length) {
+    bar.classList.add("hidden");
+    saveCart();
+    return;
+  }
+  bar.classList.remove("hidden");
+  document.getElementById("selInfo").innerHTML =
+    `<b>${selectedSeats.length}</b> seat(s): <b>${selectedSeats.map(esc).join(", ")}</b>
+     · Tickets <b>${money(seatTotal())}</b>
+     <span class="muted" style="font-size:.8rem">(+ ₹${25 * selectedSeats.length} convenience fee at checkout)</span>`;
+  saveCart();
+}
+
+function saveCart() {
+  const c = cart.read();
+  c.show_id = selectedShow;
+  c.seats = [...selectedSeats];
+  c.show_info = selectedShow && seatData ? {
+    movie: movie.title,
+    screen: seatData.show.screen_name,
+    theatre: seatData.show.theatre_name,
+    city: seatData.show.city,
+    starts_at: seatData.show.starts_at,
+  } : null;
+  cart.write(c);
+}
+
+function proceed() {
+  if (!selectedSeats.length) { toast("Pick at least one seat", "err"); return; }
+  location.href = "menu.html";
+}
+
+/* live availability polling - keeps seat map real-time */
+function startPoll() {
+  stopPoll();
+  pollTimer = setInterval(loadSeats, 5000);
+}
+function stopPoll() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+}
+window.addEventListener("beforeunload", stopPoll);
+
+async function init() {
+  if (!movieId) { location.href = "index.html"; return; }
+  cityNow = await mountCity("citySlot", () => {
+    cityNow = city.get();   // pick up the freshly chosen city
+    loadMovie();
+  });
+  await loadMovie();
+}
+init();
+</script>
+</body>
+</html>

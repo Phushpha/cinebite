@@ -1,0 +1,29 @@
+# CineBite on Render - free web service
+# Docs: https://render.com/docs/render-yaml
+services:
+  - type: web
+    name: cinebite
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: APP_URL
+        sync: false          # set to your https://xxx.onrender.com address after first deploy
+      - key: SECRET_KEY
+        generateValue: true  # sessions stay valid across restarts
+      - key: SMTP_USER
+        sync: false          # your Gmail address
+      - key: SMTP_PASSWORD
+        sync: false          # Gmail App Password (no spaces)
+      - key: SMTP_FROM
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+# NOTE: Render's free plan has no persistent disk, so cinebite.db is rebuilt
+# from the seed on every deploy/restart. That is fine for review/demo use.
+# To keep bookings across restarts, upgrade to a paid instance and add a disk.

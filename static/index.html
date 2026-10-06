@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CineBite — Movie Seats & Fresh Popcorn</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="brand" href="index.html"><span class="logo">🍿</span> Cine<span>Bite</span></a>
+  <div class="links">
+    <a href="index.html" class="on">Movies</a>
+    <a href="menu.html">Popcorn & Drinks</a>
+    <a href="orders.html">My Tickets</a>
+  </div>
+  <div class="right">
+    <span id="citySlot"></span>
+    <a href="menu.html" class="btn ghost sm cart-btn">🛒 Cart <span class="cart-badge" data-cart-badge>0</span></a>
+    <a href="login.html" class="btn sm" data-auth-link>Login</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+  <section class="hero">
+    <span class="pill gold">🍿 PRE-ORDER YOUR SNACKS</span>
+    <h1 style="margin-top:14px">Pick your seats.<br>Grab your <em>popcorn &amp; Pepsi</em>.<br>Walk in like a star.</h1>
+    <p>Book movie tickets and pre-order fresh popcorn, chilled Pepsi and combos —
+       pay online in seconds, collect at the counter with zero queue.</p>
+    <div class="cta">
+      <a href="#now-showing" class="btn">🎬 Book Tickets</a>
+      <a href="menu.html" class="btn ghost">🥤 Explore Menu</a>
+    </div>
+    <div class="stats">
+      <div><b id="stMovies">–</b><span>movies</span></div>
+      <div><b id="stCities">–</b><span>cities</span></div>
+      <div><b id="stTheatres">–</b><span>theatres</span></div>
+      <div><b id="stSnacks">–</b><span>snacks &amp; drinks</span></div>
+    </div>
+  </section>
+
+  <div class="section-title" id="now-showing">
+    <h2>🎬 Now Showing</h2><div class="rule"></div>
+    <span class="pill green" id="nowCount">BOOKING OPEN</span>
+  </div>
+
+  <div class="filters">
+    <div class="frow"><span class="flbl">Language</span><div id="langChips" class="frow" style="gap:8px"></div></div>
+    <div class="frow"><span class="flbl">Genre</span><div id="genreChips" class="frow" style="gap:8px"></div></div>
+  </div>
+
+  <div class="grid" id="movieGrid"><div class="spinner"></div></div>
+
+  <div class="section-title" id="coming-soon">
+    <h2>📅 Coming Soon</h2><div class="rule"></div>
+    <span class="pill gold">RELEASE CALENDAR</span>
+  </div>
+  <div class="grid" id="soonGrid"></div>
+
+  <div class="section-title">
+    <h2>🍿 Popcorn Bar</h2><div class="rule"></div>
+    <a href="menu.html" class="btn ghost sm">See full menu</a>
+  </div>
+  <div class="grid4" id="popcornGrid"></div>
+
+  <div class="section-title">
+    <h2>🥤 Chilled Drinks</h2><div class="rule"></div>
+    <a href="menu.html" class="btn ghost sm">See full menu</a>
+  </div>
+  <div class="grid4" id="drinkGrid"></div>
+
+  <div class="section-title">
+    <h2>🎉 Combos that save money</h2><div class="rule"></div>
+  </div>
+  <div class="grid4" id="comboGrid"></div>
+
+  <section class="panel mt" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px">
+    <div><div style="font-size:1.6rem">🪑</div><h3 class="mt">1. Pick seats</h3>
+      <p class="muted" style="font-size:.9rem">Live seat map with real-time availability. Seats lock for 10 minutes while you pay.</p></div>
+    <div><div style="font-size:1.6rem">🍿</div><h3 class="mt">2. Add popcorn &amp; drinks</h3>
+      <p class="muted" style="font-size:.9rem">Order from the full snack counter upfront — no standing in the foyer queue.</p></div>
+    <div><div style="font-size:1.6rem">🔒</div><h3 class="mt">3. Login with OTP</h3>
+      <p class="muted" style="font-size:.9rem">One-time code sent to your email. No passwords to remember.</p></div>
+    <div><div style="font-size:1.6rem">💳</div><h3 class="mt">4. Pay with Razorpay</h3>
+      <p class="muted" style="font-size:.9rem">Cards, UPI, netbanking — every payment method through Razorpay's secure checkout.</p></div>
+  </section>
+
+</div>
+
+<footer>
+  <a href="privacy.html">Privacy</a>
+  <a href="terms.html">Terms</a>
+  <a href="settings.html">Settings</a>
+  <span>© 2026 CineBite</span>
+</footer>
+
+<script src="assets/app.js"></script>
+<script>
+const EMOJI = { popcorn: "🍿", drinks: "🥤", combos: "🎉", sides: "🍟" };
+let ALL = [], LANGS = [], GENRES = [], LANG = "All", GENRE = "All";
+
+function movieCard(m) {
+  return `
+  <div class="movie ${m.releasing ? "" : "soon"}" onclick="location.href='movie.html?id=${m.id}'">
+    ${posterHTML(m)}
+    <div class="minfo">
+      <h3>${esc(m.title)}</h3>
+      <div class="sub">${esc(m.genres)}</div>
+      <div class="foot">
+        <span class="muted" style="font-size:.8rem">${m.duration_min} min · ${esc(m.languages.split(",")[0].trim())}</span>
+        <span class="btn sm">${m.releasing ? "Book" : "Details"}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function paintFilters() {
+  const mk = (id, list, cur) => {
+    document.getElementById(id).innerHTML = ["All", ...list].map(v =>
+      `<button class="chip sm ${v === cur ? "on" : ""}" data-pick="${id}" data-val="${esc(v)}">${esc(v)}</button>`
+    ).join("");
+  };
+  mk("langChips", LANGS, LANG);
+  mk("genreChips", GENRES, GENRE);
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-pick]");
+  if (!b) return;
+  if (b.dataset.pick === "langChips") LANG = b.dataset.val;
+  else GENRE = b.dataset.val;
+  paintFilters();
+  renderNow();
+});
+
+const match = (m, key, want) =>
+  want === "All" ||
+  m[key].split(",").map(s => s.trim().toLowerCase()).includes(want.toLowerCase());
+
+function renderNow() {
+  const list = ALL.filter(m => m.releasing)
+    .filter(m => match(m, "languages", LANG))
+    .filter(m => match(m, "genres", GENRE));
+  document.getElementById("nowCount").textContent = `${ALL.filter(m => m.releasing).length} FILMS`;
+  document.getElementById("movieGrid").innerHTML = list.length
+    ? list.map(movieCard).join("")
+    : '<div class="empty">No film matches that combination. Pick “All” to see everything.</div>';
+}
+
+function renderSoon() {
+  const soon = ALL.filter(m => !m.releasing);
+  document.getElementById("soonGrid").innerHTML = soon.length
+    ? soon.map(movieCard).join("")
+    : '<div class="empty">Nothing dated yet — check back soon.</div>';
+}
+
+function foodCard(it) {
+  const q = cart.read().items.find(i => i.id === it.id);
+  return `
+  <div class="fcard ${it.bestseller ? "best" : ""}">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span class="emoji">${EMOJI[it.category] || "🍽"}</span>
+      <span class="veg" title="Vegetarian"></span>
+    </div>
+    <h4>${esc(it.name)}${it.size ? ` <small class="muted">· ${esc(it.size)}</small>` : ""}</h4>
+    <div class="desc">${esc(it.description)}</div>
+    ${it.bestseller ? '<span class="pill gold" style="align-self:flex-start">BESTSELLER</span>' : ""}
+    <div class="row">
+      <span class="price">${money(it.price)}</span>
+      <div class="qty">
+        <button onclick="addFood(${it.id},'${esc(it.name).replace(/'/g,"\\'")}',${it.price},'${esc(it.size)}')">＋</button>
+        <span>${q ? q.qty : 0}</span>
+        <button onclick="decFood(${it.id})">－</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function addFood(id, name, price, size) {
+  cart.add({ id, name, price, size });
+  toast("Added to cart 🛒", "ok");
+  renderFoods();
+}
+function decFood(id) {
+  const c = cart.read();
+  const it = c.items.find(i => i.id === id);
+  cart.setQty(id, (it ? it.qty : 1) - 1);
+  renderFoods();
+}
+
+async function renderFoods() {
+  const { items } = await api("/api/menu");
+  const by = cat => items.filter(i => i.category === cat).slice(0, 4);
+  document.getElementById("popcornGrid").innerHTML = by("popcorn").map(foodCard).join("");
+  document.getElementById("drinkGrid").innerHTML = by("drinks").map(foodCard).join("");
+  document.getElementById("comboGrid").innerHTML = by("combos").map(foodCard).join("");
+}
+
+async function init() {
+  mountCity();                       // city is picked here, used on the movie page
+  try {
+    const s = await api("/api/stats");
+    document.getElementById("stMovies").textContent = s.movies;
+    document.getElementById("stCities").textContent = s.cities;
+    document.getElementById("stTheatres").textContent = s.theatres;
+    document.getElementById("stSnacks").textContent = s.snacks;
+  } catch (e) { console.error(e); }
+
+  try {
+    const data = await api("/api/movies");
+    ALL = data.movies;
+    LANGS = data.languages;
+    GENRES = data.genres;
+    paintFilters();
+    renderNow();
+    renderSoon();
+  } catch (e) {
+    document.getElementById("movieGrid").innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+  }
+  try { await renderFoods(); } catch (e) { console.error(e); }
+}
+init();
+</script>
+</body>
+</html>

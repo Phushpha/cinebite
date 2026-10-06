@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Popcorn & Drinks Menu — CineBite</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .cattabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;position:sticky;top:62px;z-index:30;
+           background:rgba(11,13,20,.92);backdrop-filter:blur(8px);padding:12px 0}
+  .cartbar{
+    position:fixed;bottom:0;left:0;right:0;z-index:45;background:rgba(18,21,31,.97);
+    border-top:1px solid var(--line);padding:13px 24px;display:flex;gap:14px;
+    justify-content:space-between;align-items:center;flex-wrap:wrap;
+  }
+  .cartbar.hidden{display:none}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="brand" href="index.html"><span class="logo">🍿</span> Cine<span>Bite</span></a>
+  <div class="links">
+    <a href="index.html">Movies</a>
+    <a href="menu.html" class="on">Popcorn & Drinks</a>
+    <a href="orders.html">My Tickets</a>
+  </div>
+  <div class="right">
+    <a href="login.html" class="btn sm" data-auth-link>Login</a>
+  </div>
+</nav>
+
+<div class="wrap" style="padding-bottom:120px">
+  <section class="hero" style="padding:38px 34px">
+    <span class="pill gold">🍟 FRESHLY POPPED · ICE COLD</span>
+    <h1 style="margin-top:12px;font-size:clamp(1.6rem,3.4vw,2.4rem)">The <em>Snack Counter</em></h1>
+    <p>Order now, skip the queue — your snacks are packed fresh and ready at the counter
+       when you arrive. Every item is pure veg.</p>
+  </section>
+
+  <div class="cattabs" id="catTabs"></div>
+  <div class="grid4" id="menuGrid"><div class="spinner"></div></div>
+
+  <div id="cartView" class="hidden">
+    <div class="section-title"><h2>🛒 Your Cart</h2><div class="rule"></div></div>
+    <div class="panel" id="cartPanel"></div>
+  </div>
+</div>
+
+<div class="cartbar hidden" id="cartBar">
+  <div>
+    <b id="barCount">0 items</b>
+    <span class="muted"> · </span>
+    <span class="price" id="barTotal">₹0</span>
+    <span class="muted" id="barSeatNote"></span>
+  </div>
+  <div style="display:flex;gap:10px">
+    <button class="btn ghost" onclick="clearCart()">Clear</button>
+    <button class="btn" onclick="goCheckout()">Checkout →</button>
+  </div>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+const EMOJI = { popcorn: "🍿", drinks: "🥤", combos: "🎉", sides: "🍟" };
+const CATS = [
+  ["", "All"], ["popcorn", "🍿 Popcorn"], ["drinks", "🥤 Drinks"],
+  ["combos", "🎉 Combos"], ["sides", "🍔 Sides"],
+];
+let menuItems = [], activeCat = "";
+
+function foodCard(it) {
+  const q = cart.read().items.find(i => i.id === it.id);
+  return `
+  <div class="fcard ${it.bestseller ? "best" : ""}">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span class="emoji">${EMOJI[it.category] || "🍽"}</span>
+      <span class="veg" title="Vegetarian"></span>
+    </div>
+    <h4>${esc(it.name)}${it.size ? ` <small class="muted">· ${esc(it.size)}</small>` : ""}</h4>
+    <div class="desc">${esc(it.description)}</div>
+    ${it.bestseller ? '<span class="pill gold" style="align-self:flex-start">BESTSELLER</span>' : ""}
+    <div class="row">
+      <span class="price">${money(it.price)}</span>
+      <div class="qty">
+        <button onclick="add(${it.id})">＋</button>
+        <span id="q-${it.id}">${q ? q.qty : 0}</span>
+        <button onclick="dec(${it.id})">－</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTabs() {
+  document.getElementById("catTabs").innerHTML = CATS.map(([v, label]) =>
+    `<button class="chip ${v === activeCat ? "on" : ""}" onclick="setCat('${v}')">${label}</button>`
+  ).join("");
+}
+
+function setCat(v) { activeCat = v; renderTabs(); renderGrid(); }
+
+function renderGrid() {
+  const list = activeCat ? menuItems.filter(i => i.category === activeCat) : menuItems;
+  document.getElementById("menuGrid").innerHTML = list.map(foodCard).join("");
+}
+
+function add(id) {
+  const it = menuItems.find(i => i.id === id);
+  cart.add(it);
+  refreshAll();
+  toast("Added 🛒", "ok");
+}
+function dec(id) {
+  const c = cart.read();
+  const it = c.items.find(i => i.id === id);
+  cart.setQty(id, (it ? it.qty : 1) - 1);
+  refreshAll();
+}
+function clearCart() {
+  if (!confirm("Clear the whole cart?")) return;
+  const c = cart.read();
+  c.items = [];
+  cart.write(c);
+  refreshAll();
+}
+function refreshAll() {
+  renderGrid();
+  renderCart();
+  cart.paint();
+}
+
+function renderCart() {
+  const c = cart.read();
+  const bar = document.getElementById("cartBar");
+  const view = document.getElementById("cartView");
+
+  if (!c.items.length && !c.show_id) {
+    bar.classList.add("hidden");
+    view.classList.add("hidden");
+    return;
+  }
+  bar.classList.remove("hidden");
+  view.classList.remove("hidden");
+
+  document.getElementById("barCount").textContent =
+    c.items.reduce((s, i) => s + i.qty, 0) + " item(s)";
+  document.getElementById("barTotal").textContent = money(cart.total());
+  document.getElementById("barSeatNote").textContent =
+    c.show_id && c.show_info ? ` · 🪑 ${c.seats.length} seat(s) for ${esc(c.show_info.movie)}` : "";
+
+  const seatBlock = c.show_id && c.show_info ? `
+    <div class="cartline">
+      <span style="font-size:1.5rem">🪑</span>
+      <div class="nm">
+        <b>${esc(c.show_info.movie)}</b>
+        <small>${esc(c.show_info.screen)} · ${new Date(c.show_info.starts_at)
+          .toLocaleString("en-IN", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit", hour12:true })}
+          · Seats ${c.seats.map(esc).join(", ")}</small>
+      </div>
+      <a class="btn ghost sm" href="movie.html?id=${new URLSearchParams(location.search).get("id") || ""}"
+         onclick="event.stopPropagation()">Change</a>
+    </div>` : `
+    <div class="cartline">
+      <span style="font-size:1.5rem">🥤</span>
+      <div class="nm"><b>Snacks only</b>
+        <small>No show selected — <a href="index.html" style="color:var(--acc)">book a movie</a> to attach seats</small></div>
+    </div>`;
+
+  const itemLines = c.items.map(i => `
+    <div class="cartline">
+      <span style="font-size:1.4rem">${EMOJI[(menuItems.find(m => m.id === i.id) || {}).category] || "🍽"}</span>
+      <div class="nm"><b>${esc(i.name)}${i.size ? " · " + esc(i.size) : ""}</b>
+        <small>${money(i.price)} × ${i.qty}</small></div>
+      <div class="qty">
+        <button onclick="dec(${i.id})">－</button><span>${i.qty}</span><button onclick="add(${i.id})">＋</button>
+      </div>
+      <b style="min-width:70px;text-align:right">${money(i.price * i.qty)}</b>
+    </div>`).join("");
+
+  document.getElementById("cartPanel").innerHTML = seatBlock + (itemLines || `
+    <p class="muted" style="padding:10px 0">Cart is empty — add some popcorn 🍿</p>`) + `
+    <div class="sumrow total"><span>Subtotal</span><span>${money(cart.total())}</span></div>
+    <p class="muted" style="font-size:.8rem">Seat tickets &amp; convenience fee are added at checkout.</p>`;
+}
+
+function goCheckout() {
+  if (!cart.read().items.length && !cart.read().show_id) {
+    toast("Your cart is empty", "err"); return;
+  }
+  location.href = "checkout.html";
+}
+
+async function init() {
+  try {
+    const { items } = await api("/api/menu");
+    menuItems = items;
+    renderTabs();
+    renderGrid();
+    renderCart();
+  } catch (e) {
+    document.getElementById("menuGrid").innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+  }
+}
+init();
+</script>
+</body>
+</html>

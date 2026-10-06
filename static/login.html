@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — CineBite</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .authbox{max-width:440px;margin:44px auto}
+  .big-emoji{font-size:3rem;text-align:center}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="brand" href="index.html"><span class="logo">🍿</span> Cine<span>Bite</span></a>
+  <div class="links">
+    <a href="index.html">Movies</a>
+    <a href="menu.html">Popcorn & Drinks</a>
+    <a href="orders.html">My Tickets</a>
+  </div>
+  <div class="right"><a href="index.html" class="btn ghost sm">← Back</a></div>
+</nav>
+
+<div class="wrap authbox">
+  <div class="panel">
+    <div class="big-emoji">🎟️</div>
+    <h2 class="center" style="margin:8px 0 4px">Login with OTP</h2>
+    <p class="center muted" style="font-size:.9rem">We send a 6-digit code — no passwords.</p>
+
+    <div id="alerts"></div>
+
+    <!-- step 1: destination -->
+    <div id="step1">
+      <div class="field">
+        <label>Email address</label>
+        <input type="email" id="emailInput" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <button class="btn block" id="sendBtn" onclick="sendOtp()">Send OTP →</button>
+      <p class="center muted mt" style="font-size:.8rem">
+        By continuing you agree to the <a href="terms.html" style="color:var(--acc)">Terms</a>
+        &amp; <a href="privacy.html" style="color:var(--acc)">Privacy Policy</a>.
+      </p>
+    </div>
+
+    <!-- step 2: enter code -->
+    <div id="step2" class="hidden">
+      <p class="center muted mt" style="font-size:.9rem">
+        Code sent to <b id="destLabel" style="color:var(--acc)"></b>
+      </p>
+      <div class="otpboxes" id="otpBoxes">
+        <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
+        <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
+        <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
+      </div>
+      <div id="timerLine" class="center muted mb" style="font-size:.85rem"></div>
+      <button class="btn block" id="verifyBtn" onclick="verifyOtp()">Verify &amp; Login</button>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn ghost sm" style="flex:1" onclick="backToStep1()">← Change</button>
+        <button class="btn ghost sm" style="flex:1" id="resendBtn" onclick="sendOtp(true)" disabled>Resend</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="center muted mt" style="font-size:.85rem">
+    Don't have an account? Just enter your email — we create it on first login.
+  </p>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+let channel = "email";
+let destination = "";
+let timerInt = null;
+
+function alertBox(msg, kind = "err") {
+  document.getElementById("alerts").innerHTML =
+    `<div class="notice ${kind}">${esc(msg)}</div>`;
+}
+function clearAlert() { document.getElementById("alerts").innerHTML = ""; }
+
+function destinationValue() {
+  return document.getElementById("emailInput").value.trim();
+}
+
+async function sendOtp(isResend = false) {
+  clearAlert();
+  destination = destinationValue();
+  if (!destination) { alertBox("Enter your email address."); return; }
+  const btn = document.getElementById(isResend ? "resendBtn" : "sendBtn");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Sending…";
+  try {
+    const data = await api("/api/auth/send-otp", {
+      method: "POST",
+      body: JSON.stringify({ channel, destination }),
+    });
+    destination = data.destination;
+    document.getElementById("destLabel").textContent = destination;
+    document.getElementById("step1").classList.add("hidden");
+    document.getElementById("step2").classList.remove("hidden");
+    startTimer(data.expires_in);
+    const boxes = document.querySelectorAll("#otpBoxes input");
+    boxes.forEach(b => b.value = "");
+    boxes[0].focus();
+    toast("OTP sent — check your inbox", "ok");
+  } catch (e) {
+    alertBox(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function startTimer(seconds) {
+  clearInterval(timerInt);
+  let left = seconds;
+  const line = document.getElementById("timerLine");
+  const resend = document.getElementById("resendBtn");
+  resend.disabled = true;
+  const tick = () => {
+    if (left <= 0) {
+      line.textContent = "Code expired — you can request a new one.";
+      resend.disabled = false;
+      clearInterval(timerInt);
+      return;
+    }
+    line.textContent = `Code valid for ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}  ·  resend available shortly`;
+    if (left < seconds - 45) resend.disabled = false;
+    left--;
+  };
+  tick();
+  timerInt = setInterval(tick, 1000);
+}
+
+async function verifyOtp() {
+  clearAlert();
+  const code = [...document.querySelectorAll("#otpBoxes input")].map(i => i.value).join("");
+  if (code.length !== 6) { alertBox("Enter all 6 digits."); return; }
+  const btn = document.getElementById("verifyBtn");
+  btn.disabled = true; btn.textContent = "Verifying…";
+  try {
+    const data = await api("/api/auth/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ channel, destination, code }),
+    });
+    auth.set(data.token, { id: data.user_id, email: destination });
+    toast("Login successful 🎉", "ok");
+    setTimeout(afterLogin, 500);
+  } catch (e) {
+    alertBox(e.message);
+    btn.disabled = false; btn.textContent = "Verify & Login";
+  }
+}
+
+function backToStep1() {
+  clearInterval(timerInt);
+  clearAlert();
+  document.getElementById("step2").classList.add("hidden");
+  document.getElementById("step1").classList.remove("hidden");
+}
+
+/* OTP box behaviour: auto-advance, backspace, paste */
+document.querySelectorAll("#otpBoxes input").forEach((input, idx, all) => {
+  input.addEventListener("input", () => {
+    input.value = input.value.replace(/\D/g, "").slice(0, 1);
+    if (input.value && idx < all.length - 1) all[idx + 1].focus();
+    if ([...all].every(i => i.value)) verifyOtp();
+  });
+  input.addEventListener("keydown", e => {
+    if (e.key === "Backspace" && !input.value && idx > 0) all[idx - 1].focus();
+  });
+  input.addEventListener("paste", e => {
+    e.preventDefault();
+    const digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+    digits.split("").forEach((d, i) => { if (all[i]) all[i].value = d; });
+    if (digits.length === 6) all[5].focus();
+  });
+});
+
+document.getElementById("emailInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") sendOtp();
+});
+
+/* already logged in? go where the user was headed */
+if (auth.loggedIn()) afterLogin();
+</script>
+</body>
+</html>

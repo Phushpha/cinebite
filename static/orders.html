@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Tickets — CineBite</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="brand" href="index.html"><span class="logo">🍿</span> Cine<span>Bite</span></a>
+  <div class="links">
+    <a href="index.html">Movies</a>
+    <a href="menu.html">Popcorn & Drinks</a>
+    <a href="orders.html" class="on">My Tickets</a>
+  </div>
+  <div class="right"><a href="login.html" class="btn sm" data-auth-link>Login</a></div>
+</nav>
+
+<div class="wrap" style="max-width:880px">
+  <div class="section-title"><h2>🎟 My Tickets &amp; Orders</h2><div class="rule"></div></div>
+  <div id="content"><div class="spinner"></div></div>
+</div>
+
+<footer>
+  <a href="privacy.html">Privacy</a>
+  <a href="terms.html">Terms</a>
+  <span>© 2026 CineBite</span>
+</footer>
+
+<script src="assets/app.js"></script>
+<script>
+const STATUS = {
+  paid:    ["PAID", "green"],
+  held:    ["AWAITING PAYMENT", "gold"],
+  expired: ["EXPIRED", "grey"],
+  cancelled:["CANCELLED", "red"],
+};
+
+function ticket(b, i) {
+  const [label, cls] = STATUS[b.status] || [b.status.toUpperCase(), "grey"];
+  const isPaid = b.status === "paid";
+  const when = b.starts_at
+    ? new Date(b.starts_at).toLocaleString("en-IN", {
+        weekday: "short", day: "numeric", month: "short",
+        hour: "2-digit", minute: "2-digit", hour12: true })
+    : "Snack pickup order";
+  const snacks = b.items.map(i2 =>
+    `${i2.qty}× ${esc(i2.name)}`).join(" · ");
+
+  return `
+  <div class="ticket">
+    <div class="strip"></div>
+    <div class="body">
+      <div class="head">
+        <div>
+          <h3>${esc(b.movie_title || "🍿 Snacks Order")}</h3>
+          <div class="meta">
+            <span>📅 ${when}</span>
+            ${b.screen_name ? `<span>🖥 ${esc(b.screen_name)}</span>` : ""}
+            ${b.seats.length ? `<span>🪑 ${b.seats.map(esc).join(", ")}</span>` : ""}
+          </div>
+        </div>
+        <span class="pill ${cls}">${label}</span>
+      </div>
+      ${snacks ? `<div class="meta"><span>🍿 ${snacks}</span></div>` : ""}
+      <div class="meta" style="justify-content:space-between;align-items:center;margin-top:12px">
+        <span class="code">${esc(b.code)}</span>
+        <b class="price">${money(b.amount)}</b>
+        <span class="muted" style="font-size:.78rem">
+          ${isPaid ? "Paid " + (b.paid_at || "") : "ref " + esc(b.code)}
+        </span>
+        ${!isPaid && b.status === "held" ?
+          `<button class="btn sm" onclick="finishPay(${b.id})">Complete Payment</button>` : ""}
+        ${b.status === "held" ?
+          `<button class="btn ghost sm" onclick="cancelBooking(${b.id})">Cancel</button>` : ""}
+      </div>
+    </div>
+  </div>`;
+}
+
+async function load() {
+  const box = document.getElementById("content");
+  if (!auth.loggedIn()) { box.innerHTML = loginPrompt(); return; }
+  try {
+    const { bookings } = await api("/api/bookings");
+    box.innerHTML = bookings.length
+      ? bookings.map(ticket).join("")
+      : `<div class="panel center">
+           <div style="font-size:2.6rem">🍿</div>
+           <p class="muted mt">No bookings yet.</p>
+           <a href="index.html" class="btn mt">Book a Movie</a>
+         </div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+  }
+}
+
+function loginPrompt() {
+  return `<div class="panel center">
+    <div style="font-size:2.6rem">🔐</div>
+    <p class="muted mt">Login with OTP to see your tickets.</p>
+    <a href="login.html" class="btn mt">Login</a>
+  </div>`;
+}
+
+async function finishPay(id) {
+  /* checkout reuses the stored hold for this booking - no duplicate booking */
+  const hold = store.get("cb_hold", null);
+  if (hold && hold.booking_id === id) {
+    location.href = "checkout.html";
+    return;
+  }
+  /* hold not on this device (e.g. cleared cart): rebuild the cart from the booking
+     so checkout can restore it from the server-side hold */
+  try {
+    const { bookings } = await api("/api/bookings");
+    const b = bookings.find(x => x.id === id);
+    if (!b) { toast("Booking not found", "err"); return; }
+    cart.write({
+      show_id: b.show_id, seats: b.seats,
+      items: b.items.map(i => ({ id: i.id, qty: i.qty, name: i.name, price: i.price, size: i.size || "" })),
+      show_info: b.show_id && b.movie_title ? {
+        movie: b.movie_title, screen: b.screen_name, starts_at: b.starts_at,
+      } : null,
+    });
+    location.href = "checkout.html";
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function cancelBooking(id) {
+  if (!confirm("Release this hold? Seats go back to availability.")) return;
+  try {
+    await api(`/api/bookings/${id}/cancel`, { method: "POST" });
+    toast("Booking cancelled", "ok");
+    load();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+load();
+</script>
+</body>
+</html>

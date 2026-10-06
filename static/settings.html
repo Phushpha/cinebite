@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings — CineBite</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .srow{display:flex;justify-content:space-between;gap:14px;align-items:center;
+        padding:15px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .srow:last-child{border-bottom:none}
+  .srow .lbl b{display:block}
+  .srow .lbl small{color:var(--mut)}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a class="brand" href="index.html"><span class="logo">🍿</span> Cine<span>Bite</span></a>
+  <div class="links">
+    <a href="index.html">Movies</a>
+    <a href="menu.html">Popcorn & Drinks</a>
+    <a href="orders.html">My Tickets</a>
+  </div>
+  <div class="right"><a href="login.html" class="btn sm" data-auth-link>Login</a></div>
+</nav>
+
+<div class="wrap" style="max-width:720px">
+  <div class="section-title"><h2>⚙ Settings &amp; Status</h2><div class="rule"></div></div>
+
+  <div class="panel">
+    <h3>System status</h3>
+    <div id="statusBox"><div class="spinner" style="margin:24px auto"></div></div>
+  </div>
+
+  <div class="panel mt">
+    <h3>Account</h3>
+    <div class="srow">
+      <div class="lbl"><b id="acctLabel">Not logged in</b>
+        <small>Login uses a one-time password — no password to manage.</small></div>
+      <div id="acctAction"><a href="login.html" class="btn sm">Login</a></div>
+    </div>
+    <div class="srow">
+      <div class="lbl"><b>Cart</b><small>Snacks and seat selection stored on this device.</small></div>
+      <button class="btn ghost sm" onclick="clearCart();toast('Cart cleared','ok')">Clear cart</button>
+    </div>
+  </div>
+
+  <div class="panel mt">
+    <h3>Local setup</h3>
+    <p class="muted" style="font-size:.9rem">
+      Server runs from the project folder: <code>py run.py</code><br>
+      Configuration lives in the <code>.env</code> file — SMTP (email OTP)
+      and Razorpay keys.<br>
+      After editing <code>.env</code>, restart the server.
+    </p>
+  </div>
+</div>
+
+<footer><a href="index.html">Home</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></footer>
+
+<script src="assets/app.js"></script>
+<script>
+function badge(ok, okText, noText) {
+  return ok
+    ? `<span class="pill green">${okText}</span>`
+    : `<span class="pill red">${noText}</span>`;
+}
+
+async function loadStatus() {
+  const box = document.getElementById("statusBox");
+  try {
+    const cfg = await api("/api/config");
+    box.innerHTML = `
+      <div class="srow">
+        <div class="lbl"><b>📧 Email OTP (SMTP)</b>
+          <small>Sends login codes from ${cfg.otp_channels.email ? "your configured mailbox" : "an unconfigured mailbox"}</small></div>
+        ${badge(cfg.otp_channels.email, "READY", "NOT CONFIGURED")}
+      </div>
+      <div class="srow">
+        <div class="lbl"><b>💳 Razorpay</b>
+          <small>${cfg.razorpay.configured
+            ? "Key: " + esc(cfg.razorpay.key_id)
+            : "Add RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET to .env"}</small></div>
+        ${cfg.razorpay.configured
+          ? `<span class="pill ${cfg.razorpay.mode === "live" ? "green" : "gold"}">${cfg.razorpay.mode.toUpperCase()} MODE</span>`
+          : `<span class="pill red">NOT CONFIGURED</span>`}
+      </div>
+      <div class="srow">
+        <div class="lbl"><b>⏳ Seat hold</b><small>Seats are reserved while payment is in progress</small></div>
+        <span class="pill grey">${Math.round(cfg.booking_hold_seconds / 60)} MINUTES</span>
+      </div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+  }
+}
+
+function paintAccount() {
+  const u = auth.user();
+  if (auth.loggedIn() && u) {
+    document.getElementById("acctLabel").textContent = u.email || u.phone || ("ID " + u.id);
+    document.getElementById("acctAction").innerHTML =
+      `<button class="btn ghost sm" onclick="logout()">Logout</button>`;
+  }
+}
+
+loadStatus();
+paintAccount();
+</script>
+</body>
+</html>
