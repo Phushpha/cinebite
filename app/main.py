@@ -145,6 +145,21 @@ def api_stats():
 @app.get("/health")
 def health():
     """Readiness probe for hosting platforms (Render, load balancers)."""
+    return {"status": "ok", "movies": len(movies_all())}
+
+
+@app.get("/api/debug/smtp")
+def debug_smtp():
+    return {
+        "host": config.SMTP_HOST,
+        "port": config.SMTP_PORT,
+        "ssl": config.SMTP_SSL,
+        "starttls": config.SMTP_STARTTLS,
+        "from": config.SMTP_FROM,
+        "user_set": bool(config.SMTP_USER),
+        "pass_set": bool(config.SMTP_PASSWORD),
+        "configured": config.email_configured(),
+    }
     with connect() as conn:
         movies = conn.execute("SELECT COUNT(*) c FROM movies").fetchone()["c"]
     return {"status": "ok", "movies": movies}
