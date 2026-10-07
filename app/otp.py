@@ -75,13 +75,15 @@ def _send_email(destination: str, code: str) -> None:
     try:
         context = ssl.create_default_context()
         if config.SMTP_SSL:
-            with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context, timeout=30) as server:
+            with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context, timeout=60) as server:
                 server.login(config.SMTP_USER, config.SMTP_PASSWORD)
                 server.sendmail(config.SMTP_FROM, [destination], msg.as_string())
         else:
-            with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as server:
+            with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=60) as server:
+                server.ehlo()
                 if config.SMTP_STARTTLS:
                     server.starttls(context=context)
+                    server.ehlo()
                 server.login(config.SMTP_USER, config.SMTP_PASSWORD)
                 server.sendmail(config.SMTP_FROM, [destination], msg.as_string())
     except smtplib.SMTPAuthenticationError as exc:
