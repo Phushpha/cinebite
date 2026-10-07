@@ -73,7 +73,7 @@ def _send_email(destination: str, code: str) -> None:
                 # Resend accepts either "email@domain.com" or "Name <email@domain.com>"
                 # For onboarding@resend.dev, try Name <email> format
                 if from_email.strip().lower() == "onboarding@resend.dev":
-                    from_email = "CineBite <onboarding@resend.dev>"
+                    from_email = "onboarding@resend.dev"
                 r = client.post(
                     "https://api.resend.com/emails",
                     headers={
@@ -88,6 +88,26 @@ def _send_email(destination: str, code: str) -> None:
                         "html": html,
                     },
                 )
+                if r.status_code == 422:
+                    # Try alternative format
+                    try:
+                        r2 = client.post(
+                            "https://api.resend.com/emails",
+                            headers={
+                                "Authorization": f"Bearer {config.RESEND_API_KEY}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "from": "CineBite <onboarding@resend.dev>",
+                                "to": [destination],
+                                "subject": f"{config.APP_NAME} login code: {code}",
+                                "text": text,
+                                "html": html,
+                            },
+                        )
+                        r = r2
+                    except Exception:
+                        pass
                 if r.status_code >= 400:
                     raise OtpError(f"Failed to send email: {r.text}")
             return
