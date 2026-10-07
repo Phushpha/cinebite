@@ -10,6 +10,8 @@ import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import httpx
+
 from . import config
 from .database import connect
 
@@ -53,14 +55,6 @@ def _check_limits(destination: str) -> None:
 
 # ------------------------------------------------------------------ delivery
 def _send_email(destination: str, code: str) -> None:
-    if not config.email_configured():
-        raise OtpError(
-            "Email OTP is not configured. Set SMTP_USER and SMTP_PASSWORD in the .env file."
-        )
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"{config.APP_NAME} login code: {code}"
-    msg["From"] = config.SMTP_FROM
-    msg["To"] = destination
     text = f"Your {config.APP_NAME} login code is {code}. It expires in 5 minutes."
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;
@@ -70,6 +64,39 @@ def _send_email(destination: str, code: str) -> None:
       <p style="font-size:32px;letter-spacing:10px;font-weight:bold">{code}</p>
       <p style="color:#666">Valid for 5 minutes. Never share this code with anyone.</p>
     </div>"""
+
+    # Prefer Resend API if configured (works well on Render)
+    if getattr(config, "RESEND_API_KEY", None):
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                r = client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {config.RESEND_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "from": config.RESEND_FROM or "onboarding@resend.dev",
+                        "to": [destination],
+                        "subject": f"{config.APP_NAME} login code: {code}",
+                        "text": text,
+                        "html": html,
+                    },
+                )
+                if r.status_code >= 400:
+                    raise OtpError(f"Failed to send email: {r.text}")
+            return
+        except httpx.HTTPError as exc:
+            raise OtpError(f"Failed to send email via Resend: {exc}") from exc
+
+    if not config.email_configured():
+        raise OtpError(
+            "Email OTP is not configured. Set SMTP_USER/SMTP_PASSWORD or RESEND_API_KEY."
+        )
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"{config.APP_NAME} login code: {code}"
+    msg["From"] = config.SMTP_FROM
+    msg["To"] = destination
     msg.attach(MIMEText(text, "plain"))
     msg.attach(MIMEText(html, "html"))
     try:
@@ -87,10 +114,7 @@ def _send_email(destination: str, code: str) -> None:
                 server.login(config.SMTP_USER, config.SMTP_PASSWORD)
                 server.sendmail(config.SMTP_FROM, [destination], msg.as_string())
     except smtplib.SMTPAuthenticationError as exc:
-        raise OtpError(
-            "SMTP login failed. For Gmail use an App Password (Google Account → "
-            "2-Step Verification → App passwords) in SMTP_PASSWORD."
-        ) from exc
+        raise OtpError("SMTP login failed.") from exc
     except (smtplib.SMTPException, OSError) as exc:
         raise OtpError(f"Could not reach the mail server: {exc}") from exc
 

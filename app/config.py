@@ -62,6 +62,8 @@ SMTP_PASSWORD = env("SMTP_PASSWORD")
 SMTP_FROM = env("SMTP_FROM") or SMTP_USER
 SMTP_STARTTLS = env("SMTP_STARTTLS", "true").lower() == "true"
 SMTP_SSL = env("SMTP_SSL", "false").lower() == "true"
+RESEND_API_KEY = env("RESEND_API_KEY")
+RESEND_FROM = env("RESEND_FROM") or SMTP_FROM
 
 
 def email_configured() -> bool:
