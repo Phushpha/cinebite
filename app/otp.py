@@ -69,6 +69,9 @@ def _send_email(destination: str, code: str) -> None:
     if getattr(config, "RESEND_API_KEY", None):
         try:
             with httpx.Client(timeout=30.0) as client:
+                from_email = getattr(config, "RESEND_FROM", None) or "onboarding@resend.dev"
+                # Resend accepts either "email@domain.com" or "Name <email@domain.com>"
+                # For onboarding@resend.dev, plain email usually works
                 r = client.post(
                     "https://api.resend.com/emails",
                     headers={
@@ -76,7 +79,7 @@ def _send_email(destination: str, code: str) -> None:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "from": "CineBite <onboarding@resend.dev>",
+                        "from": from_email,
                         "to": [destination],
                         "subject": f"{config.APP_NAME} login code: {code}",
                         "text": text,
