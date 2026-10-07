@@ -73,11 +73,17 @@ def _send_email(destination: str, code: str) -> None:
     msg.attach(MIMEText(text, "plain"))
     msg.attach(MIMEText(html, "html"))
     try:
-        with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=20) as server:
-            if config.SMTP_STARTTLS:
-                server.starttls(context=ssl.create_default_context())
-            server.login(config.SMTP_USER, config.SMTP_PASSWORD)
-            server.sendmail(config.SMTP_FROM, [destination], msg.as_string())
+        context = ssl.create_default_context()
+        if config.SMTP_SSL:
+            with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context, timeout=30) as server:
+                server.login(config.SMTP_USER, config.SMTP_PASSWORD)
+                server.sendmail(config.SMTP_FROM, [destination], msg.as_string())
+        else:
+            with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as server:
+                if config.SMTP_STARTTLS:
+                    server.starttls(context=context)
+                server.login(config.SMTP_USER, config.SMTP_PASSWORD)
+                server.sendmail(config.SMTP_FROM, [destination], msg.as_string())
     except smtplib.SMTPAuthenticationError as exc:
         raise OtpError(
             "SMTP login failed. For Gmail use an App Password (Google Account → "

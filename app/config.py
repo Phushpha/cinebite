@@ -61,6 +61,7 @@ SMTP_USER = env("SMTP_USER")
 SMTP_PASSWORD = env("SMTP_PASSWORD")
 SMTP_FROM = env("SMTP_FROM") or SMTP_USER
 SMTP_STARTTLS = env("SMTP_STARTTLS", "true").lower() == "true"
+SMTP_SSL = env("SMTP_SSL", "false").lower() == "true"
 
 
 def email_configured() -> bool:
