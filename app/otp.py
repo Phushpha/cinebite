@@ -71,7 +71,9 @@ def _send_email(destination: str, code: str) -> None:
             with httpx.Client(timeout=30.0) as client:
                 from_email = getattr(config, "RESEND_FROM", None) or "onboarding@resend.dev"
                 # Resend accepts either "email@domain.com" or "Name <email@domain.com>"
-                # For onboarding@resend.dev, plain email usually works
+                # For onboarding@resend.dev, try Name <email> format
+                if from_email.strip().lower() == "onboarding@resend.dev":
+                    from_email = "CineBite <onboarding@resend.dev>"
                 r = client.post(
                     "https://api.resend.com/emails",
                     headers={
