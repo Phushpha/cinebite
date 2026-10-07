@@ -17,7 +17,7 @@ from .config import BASE_DIR
 DB_PATH = BASE_DIR / "cinebite.db"
 _local = threading.Lock()
 
-SEED_VERSION = "3"          # v3 = city / theatre / 2026 release slate
+SEED_VERSION = "4"          # v4 = add Jharkhand cities (Bokaro, Ranchi, Dhanbad) + auto-detect support
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -198,6 +198,21 @@ CITIES = [
         ("Raj Mandir Cinema", "Ashok Marg", ["GOLD CLASS", "AUD 2"]),
         ("PVR Malls Mall", "Vaishali Nagar", ["AUD 1", "AUD 2"]),
         ("Cinepolis World Trade Park", "Malviya Nagar", ["AUD 1", "AUD 3"]),
+    ]),
+    ("Bokaro", 0.80, [
+        ("INOX Bokaro City Centre", "Sector 4", ["IMAX", "AUD 2"]),
+        ("Cinepolis Bokaro Mall", "Sector 5", ["AUD 1", "AUD 2"]),
+        ("PVR Bokaro Heights", "City Centre", ["AUD 1", "AUD 3"]),
+    ]),
+    ("Ranchi", 0.90, [
+        ("PVR Nucleus Mall", "Lalpur", ["IMAX", "AUD 2"]),
+        ("INOX JD Hi Street Mall", "Tharpakhna", ["AUD 1", "AUD 2"]),
+        ("Cinepolis Spring City", "Harmu", ["AUD 1", "AUD 2"]),
+    ]),
+    ("Dhanbad", 0.80, [
+        ("INOX Dhanbad Mall", "Bank More", ["AUD 1", "AUD 2"]),
+        ("PVR Ozone Galleria", "Saraidhela", ["AUD 1", "AUD 2"]),
+        ("Cinepolis Ispat Nagar", "Ispat Nagar", ["AUD 1", "AUD 3"]),
     ]),
 ]
 
@@ -425,8 +440,24 @@ def _price(base: int, multiplier: float) -> int:
 def seed() -> None:
     """Idempotent seed: movies, cities, theatres, 7 days of shows, snack menu."""
     with _local, connect() as conn:
-        if conn.execute("SELECT COUNT(*) c FROM movies").fetchone()["c"]:
-            return
+        # Check seed version first; if mismatch, rebuild schedule side
+        version = conn.execute(
+            "SELECT value FROM app_meta WHERE key='seed_version'"
+        ).fetchone()
+        version = version["value"] if version else "0"
+        if version == SEED_VERSION:
+            # Already seeded at current version
+            if conn.execute("SELECT COUNT(*) c FROM movies").fetchone()["c"]:
+                return
+        # If version mismatch or not fully seeded, wipe schedule data (users kept)
+        conn.execute("DELETE FROM sqlite_sequence")
+        conn.execute("DELETE FROM seat_holds")
+        conn.execute("DELETE FROM bookings")
+        conn.execute("DELETE FROM shows")
+        conn.execute("DELETE FROM screens")
+        conn.execute("DELETE FROM theatres")
+        conn.execute("DELETE FROM menu_items")
+        conn.execute("DELETE FROM movies")
 
         # ---- movies ------------------------------------------------------
         conn.executemany(

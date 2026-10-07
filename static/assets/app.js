@@ -150,13 +150,56 @@ async function mountCity(slotId, onChange) {
       `<span class="citybox">📍<select aria-label="Choose your city">${cities
         .map(c => `<option value="${esc(c.city)}"${c.city === cur ? " selected" : ""}>` +
                  `${esc(c.city)}</option>`)
-        .join("")}</select></span>`;
+        .join("")}</select><button type="button" id="locBtn" class="locbtn" title="Detect my location">📍 Auto</button></span>`;
     host.querySelector("select").addEventListener("change", e => {
       city.set(e.target.value);
       onChange && onChange(e.target.value);
     });
+    const locBtn = document.getElementById("locBtn");
+    if (locBtn) {
+      locBtn.addEventListener("click", () => {
+        if (!navigator.geolocation) { toast("Geolocation not supported","err"); return; }
+        locBtn.disabled = true; locBtn.textContent = "Detecting...";
+        navigator.geolocation.getCurrentPosition((pos) => {
+          const c = nearestCity(pos.coords.latitude, pos.coords.longitude);
+          if (c && cities.some(x=>x.city===c)) {
+            city.set(c);
+            onChange && onChange(c);
+            locBtn.textContent = "📍 Auto"; locBtn.disabled=false;
+          } else {
+            locBtn.textContent="📍 Auto"; locBtn.disabled=false; toast("Could not map location","warn");
+          }
+        }, (err) => { locBtn.textContent="📍 Auto"; locBtn.disabled=false; toast(err.message||"Location denied","warn"); },
+        {enableHighAccuracy:true, timeout:10000, maximumAge:600000});
+      });
+    }
   }
   return cur;
+}
+
+const CITY_COORDS = {
+  "Mumbai": {lat:19.076, lon:72.8777},
+  "Delhi NCR": {lat:28.7041, lon:77.1025},
+  "Bengaluru": {lat:12.9716, lon:77.5946},
+  "Pune": {lat:18.5204, lon:73.8567},
+  "Hyderabad": {lat:17.385, lon:78.4867},
+  "Chennai": {lat:13.0827, lon:80.2707},
+  "Kolkata": {lat:22.5726, lon:88.3639},
+  "Jaipur": {lat:26.9124, lon:75.7873},
+  "Bokaro": {lat:23.6693, lon:86.1511},
+  "Ranchi": {lat:23.3441, lon:85.3096},
+  "Dhanbad": {lat:23.7957, lon:86.4304}
+};
+
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371; const dLat=(lat2-lat1)*Math.PI/180; const dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a))*R;
+}
+function nearestCity(lat,lon){
+  let best=null, min=Infinity;
+  for (const [name,c] of Object.entries(CITY_COORDS)){ const d=haversine(lat,lon,c.lat,c.lon); if (d<min){ min=d; best=name; } }
+  return best;
 }
 
 /* ---------------- posters ----------------
