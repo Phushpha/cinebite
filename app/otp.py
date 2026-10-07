@@ -76,7 +76,7 @@ def _send_email(destination: str, code: str) -> None:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "from": "onboarding@resend.dev",
+                        "from": "CineBite <onboarding@resend.dev>",
                         "to": [destination],
                         "subject": f"{config.APP_NAME} login code: {code}",
                         "text": text,
